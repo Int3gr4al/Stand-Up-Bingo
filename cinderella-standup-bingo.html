@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cinderella's Stand-Up Bingo</title>
+<style>
+  :root {
+    --bg1: #0a0a0b;
+    --bg2: #141416;
+    --card: #1f1f23;
+    --border: #2a2a30;
+    --text: #e7e7ea;
+    --muted: #a0a0a8;
+    --accent: #4ade80;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    min-height: 100%;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    color: var(--text);
+    background: radial-gradient(1200px 800px at 20% -10%, #1a1a20, transparent), linear-gradient(#0b0b0c, #111113 16%, #0d0d10 100%);
+    background-attachment: fixed;
+  }
+  .wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(24px, 3vw, 38px);
+    letter-spacing: 0.2px;
+  }
+  .sub {
+    color: var(--muted);
+    margin-top: 6px;
+    font-size: 14px;
+  }
+  .controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: 14px;
+  }
+  button {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 16px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button:hover { background: #26262c; }
+  .score {
+    padding: 10px 14px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    background: var(--card);
+    font-weight: 600;
+  }
+  .grid {
+    margin-top: 20px;
+    display: grid;
+    gap: 10px;
+  }
+  .tile {
+    min-height: 90px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 12px;
+    border-radius: 18px;
+    border: 1px solid var(--border);
+    background: #1a1a1f;
+    transition: background .15s ease, border-color .15s ease, transform .05s ease;
+    user-select: none;
+    font-size: clamp(13px, 2.3vw, 18px);
+    line-height: 1.2;
+  }
+  .tile:hover {
+    background: #22222a;
+  }
+  .tile.on {
+    background: rgba(74, 222, 128, 0.16);
+    border-color: rgba(74, 222, 128, 0.7);
+    color: #bdf7cf;
+    transform: translateY(-1px);
+  }
+  .footer {
+    margin-top: 16px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .confetti-host { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  @keyframes fall {
+    to { transform: translateY(110vh) rotate(720deg); opacity: .9; }
+  }
+</style>
+</head>
+<body>
+<div class="confetti-host" id="confetti"></div>
+<div class="wrap">
+  <header>
+    <h1>🎙️ Cinderella's Stand-Up Bingo</h1>
+    <p class="sub">Click squares to mark. Get a full row/column/diagonal to celebrate with confetti. Shuffle for a new layout.</p>
+    <div class="controls">
+      <button id="shuffleBtn" title="Randomise tile positions">🔀 Shuffle</button>
+      <button id="resetBtn" title="Clear your marks">♻️ Reset</button>
+      <div class="score">Bingos: <span id="bingoCount">0</span></div>
+    </div>
+  </header>
+
+  <main>
+    <div id="grid" class="grid"></div>
+  </main>
+
+  <p class="footer">This edition uses only your custom tiles (15). Add more later to expand the grid.</p>
+</div>
+
+<script>
+  // ---- Config: your personal tiles (15 total) ----
+  const TILES = [
+    "Bits and bobs",
+    "BAU",
+    "Technical Issues",
+    "I've got a Dr's appointment",
+    "Headache",
+    "Eyes hurting",
+    "Not feeling great today",
+    "Lots of emails to go through",
+    "Meetings",
+    "Pen Test",
+    "Not sure who's been",
+    "Teams having issues",
+    "Talking over / coughing over people",
+    "On mute",
+    "Laptop doing updates",
+  ];
+
+  // We'll render a compact grid: 5 columns by ceil(TILES.length / 5) rows
+  const COLS = 5;
+  const ROWS = Math.ceil(TILES.length / COLS);
+
+  const gridEl = document.getElementById('grid');
+  const countEl = document.getElementById('bingoCount');
+  const confettiHost = document.getElementById('confetti');
+
+  let order = [];
+  let selected = new Set();
+
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  function layoutGrid() {
+    gridEl.style.gridTemplateColumns = `repeat(${COLS}, minmax(140px, 1fr))`;
+    gridEl.innerHTML = '';
+    order.forEach((text, idx) => {
+      const btn = document.createElement('button');
+      btn.className = 'tile' + (selected.has(idx) ? ' on' : '');
+      btn.textContent = text;
+      btn.addEventListener('click', () => toggle(idx, btn));
+      gridEl.appendChild(btn);
+    });
+  }
+
+  function generateOrder() {
+    order = shuffle(TILES);
+  }
+
+  function toggle(idx, el) {
+    if (selected.has(idx)) {
+      selected.delete(idx);
+      el.classList.remove('on');
+    } else {
+      selected.add(idx);
+      el.classList.add('on');
+    }
+    updateBingoCount();
+  }
+
+  // Compute lines for dynamic ROWS x COLS grid
+  function computeLines() {
+    const lines = [];
+    // Rows
+    for (let r = 0; r < ROWS; r++) {
+      const line = [];
+      for (let c = 0; c < COLS; c++) {
+        const i = r * COLS + c;
+        if (i < order.length) line.push(i);
+      }
+      if (line.length === COLS) lines.push(line);
+    }
+    // Cols
+    for (let c = 0; c < COLS; c++) {
+      const line = [];
+      for (let r = 0; r < ROWS; r++) {
+        const i = r * COLS + c;
+        if (i < order.length) line.push(i);
+      }
+      if (line.length === ROWS) lines.push(line);
+    }
+    // Major diagonal (top-left to bottom-right) — only if rectangle complete
+    const diag1 = [];
+    for (let i = 0; i < Math.min(ROWS, COLS); i++) {
+      const idx = i * COLS + i;
+      if (idx < order.length) diag1.push(idx);
+    }
+    if (diag1.length === Math.min(ROWS, COLS)) lines.push(diag1);
+
+    // Minor diagonal (top-right to bottom-left)
+    const diag2 = [];
+    for (let i = 0; i < Math.min(ROWS, COLS); i++) {
+      const idx = i * COLS + (COLS - 1 - i);
+      if (idx < order.length) diag2.push(idx);
+    }
+    if (diag2.length === Math.min(ROWS, COLS)) lines.push(diag2);
+
+    return lines;
+  }
+
+  const LINES = computeLines();
+
+  function updateBingoCount() {
+    const isLine = (line) => line.every(i => selected.has(i));
+    const count = LINES.filter(isLine).length;
+    countEl.textContent = count;
+    if (count > 0) burstConfetti();
+  }
+
+  function reset() {
+    selected = new Set();
+    countEl.textContent = '0';
+    layoutGrid();
+  }
+
+  function reshuffle() {
+    generateOrder();
+    reset();
+  }
+
+  function burstConfetti() {
+    if (!confettiHost) return;
+    const N = 90;
+    for (let i = 0; i < N; i++) {
+      const piece = document.createElement('div');
+      piece.style.position = 'absolute';
+      piece.style.width = '8px';
+      piece.style.height = '8px';
+      piece.style.opacity = '0.9';
+      piece.style.left = Math.random() * 100 + '%';
+      piece.style.top = '-12px';
+      piece.style.transform = `rotate(${Math.random() * 360}deg)`;
+      piece.style.background = `hsl(${Math.floor(Math.random() * 360)}, 90%, 60%)`;
+      piece.style.animation = `fall ${1.6 + Math.random() * 1.6}s linear forwards`;
+      confettiHost.appendChild(piece);
+      setTimeout(() => piece.remove(), 3300);
+    }
+  }
+
+  // Init
+  generateOrder();
+  layoutGrid();
+
+  // Bind controls
+  document.getElementById('shuffleBtn').addEventListener('click', reshuffle);
+  document.getElementById('resetBtn').addEventListener('click', reset);
+</script>
+</body>
+</html>
