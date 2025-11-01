@@ -3,224 +3,323 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Cinderella's Stand-Up Bingo</title>
+<title>Cinderella's Stand-Up Bingo — Weekly Multiplayer</title>
 <style>
-  :root {
-    --bg1: #0a0a0b;
-    --bg2: #141416;
-    --card: #1f1f23;
-    --border: #2a2a30;
-    --text: #e7e7ea;
-    --muted: #a0a0a8;
-    --accent: #4ade80;
-  }
-  html, body { height: 100%; }
-  body {
-    margin: 0;
-    min-height: 100%;
-    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-    color: var(--text);
-    background: radial-gradient(1200px 800px at 20% -10%, #1a1a20, transparent), linear-gradient(#0b0b0c, #111113 16%, #0d0d10 100%);
-    background-attachment: fixed;
-  }
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
-  h1 { margin: 0; font-size: clamp(24px, 3vw, 38px); letter-spacing: 0.2px; }
-  .sub { color: var(--muted); margin-top: 6px; font-size: 14px; }
-  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
-  button {
-    background: var(--card); border: 1px solid var(--border); color: var(--text);
-    padding: 10px 14px; border-radius: 16px; cursor: pointer; font-weight: 600;
-  }
-  button:hover { background: #26262c; }
-  .score, .blackout {
-    padding: 10px 14px; border-radius: 16px; border: 1px solid var(--border);
-    color: var(--muted); background: var(--card); font-weight: 600;
-  }
-  .blackout.on { background: rgba(74,222,128,.16); border-color: rgba(74,222,128,.7); color: #bdf7cf; }
-  .grid { margin-top: 20px; display: grid; gap: 10px; }
-  .tile {
-    min-height: 90px; display: flex; align-items: center; justify-content: center;
-    text-align: center; padding: 12px; border-radius: 18px; border: 1px solid var(--border);
-    background: #1a1a1f; transition: background .15s ease, border-color .15s ease, transform .05s ease;
-    user-select: none; font-size: clamp(13px, 2.3vw, 18px); line-height: 1.2;
-  }
-  .tile:hover { background: #22222a; }
-  .tile.on { background: rgba(74, 222, 128, 0.16); border-color: rgba(74, 222, 128, 0.7); color: #bdf7cf; transform: translateY(-1px); }
-  .footer { margin-top: 16px; color: var(--muted); font-size: 13px; }
-  .confetti-host { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
-  @keyframes fall { to { transform: translateY(110vh) rotate(720deg); opacity: .9; } }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0b0b0f; color:#eaeaf0; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { margin:0 0 6px 0; font-size: clamp(22px,3vw,36px); }
+  .muted { color:#a3a3ad; }
+  .controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin: 12px 0 16px; }
+  input, select, button { background:#17171d; color:#eaeaf0; border:1px solid #2a2a34; border-radius:12px; padding:10px 12px; }
+  button { cursor:pointer; }
+  button:hover { background:#1e1e26; }
+  .grid { display:grid; gap:10px; grid-template-columns: repeat(5, minmax(120px,1fr)); }
+  .tile { display:flex; flex-direction:column; justify-content:space-between; align-items:center;
+          min-height:110px; padding:10px; text-align:center; border:1px solid #2a2a34; border-radius:14px; background:#14141a; }
+  .tile.on { background: rgba(74, 222, 128, .16); border-color: rgba(74,222,128,.7); color:#c9f6d9; }
+  .who { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; padding-bottom:4px; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid #ffffff40; }
+  .panel { background:#101018; border:1px solid #2a2a34; border-radius:16px; padding:12px; }
+  .presence li { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dashed #2a2a34; }
+  .presence li:last-child { border-bottom:0; }
+  .right { display:grid; gap:10px; }
+  .confetti { position:fixed; inset:0; pointer-events:none; overflow:hidden; }
+  @keyframes fall { to { transform: translateY(110vh) rotate(720deg); opacity:.9; } }
 </style>
 </head>
 <body>
-<div class="confetti-host" id="confetti"></div>
+<div class="confetti" id="confetti"></div>
 <div class="wrap">
   <header>
-    <h1>🎙️ Cinderella's Stand-Up Bingo</h1>
-    <p class="sub">Bingo if you complete any full line <em>or</em> get a blackout (all squares). Click to mark, shuffle for new layout.</p>
+    <h1>🎙️ Cinderella’s Stand-Up Bingo</h1>
+    <div class="muted">Shared board, live clicks, weekly history (Mon–Fri).</div>
     <div class="controls">
-      <button id="shuffleBtn" title="Randomise tile positions">🔀 Shuffle</button>
-      <button id="resetBtn" title="Clear your marks">♻️ Reset</button>
-      <div class="score">Lines: <span id="bingoCount">0</span></div>
-      <div id="blackoutTag" class="blackout">Blackout: <span id="blackoutVal">NO</span></div>
+      <input id="name" placeholder="Display name" />
+      <button id="join">Join</button>
+      <button id="reset">Reset marks</button>
+      <button id="shuffle" title="Reorder tiles for future weeks only">Shuffle next week</button>
+      <span id="weeklabel" class="muted"></span>
     </div>
   </header>
 
-  <main>
-    <div id="grid" class="grid"></div>
-  </main>
+  <main style="display:grid; grid-template-columns: 1fr 300px; gap:16px; align-items:start;">
+    <section>
+      <div id="grid" class="grid"></div>
+      <div class="muted" style="margin-top:8px;">Lines and blackout detected per user; initials show who marked each tile.</div>
+    </section>
 
-  <p class="footer">This edition uses only your custom tiles (15). Add more later to expand the grid.</p>
+    <aside class="right">
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong>Presence</strong>
+          <small id="me"></small>
+        </div>
+        <ul id="presence" class="presence" style="list-style:none; padding:0; margin:10px 0 0;"></ul>
+      </div>
+      <div class="panel">
+        <strong>History</strong>
+        <div id="history" class="muted" style="margin-top:8px; font-size:14px;">—</div>
+      </div>
+    </aside>
+  </main>
 </div>
 
-<script>
-  // ---- Config: your personal tiles (15 total) ----
-  const TILES = [
-    "Bits and bobs",
-    "BAU",
-    "Technical Issues",
-    "I've got a Dr's appointment",
-    "Headache",
-    "Eyes hurting",
-    "Not feeling great today",
-    "Lots of emails to go through",
-    "Meetings",
-    "Pen Test",
-    "Not sure who's been",
-    "Teams having issues",
-    "Talking over / coughing over people",
-    "On mute",
-    "Laptop doing updates",
-  ];
+<script type="module">
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-  const COLS = 5;
-  const ROWS = Math.ceil(TILES.length / COLS);
+const SUPABASE_URL = "https://xkqejhirtnlxuzyzbfju.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhrcWVqaGlydG5seHV6eXpiZmp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5OTQxODUsImV4cCI6MjA3NzU3MDE4NX0.a0O8w_Mxi3YQwuBorpyITIT7HxAqlcNaSCbKhHTiOVU";
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  const gridEl = document.getElementById('grid');
-  const countEl = document.getElementById('bingoCount');
-  const blackoutVal = document.getElementById('blackoutVal');
-  const blackoutTag = document.getElementById('blackoutTag');
-  const confettiHost = document.getElementById('confetti');
+// === CONFIG ===
+const BOARD_TITLE = "Cinderella’s Stand-Up Bingo";
+const TILES = [
+  "Bits and bobs","BAU","Technical Issues","I've got a Dr's appointment","Headache",
+  "Eyes hurting","Not feeling great today","Lots of emails to go through","Meetings","Pen Test",
+  "Not sure who's been","Teams having issues","Talking over / coughing over people","On mute","Laptop doing updates"
+];
 
-  let order = [];
-  let selected = new Set();
-  let completedLines = new Set(); // track which line indices are already counted
-  let prevBlackout = false;
+// === DOM ===
+const gridEl = document.getElementById("grid");
+const joinBtn = document.getElementById("join");
+const resetBtn = document.getElementById("reset");
+const shuffleBtn = document.getElementById("shuffle");
+const nameEl = document.getElementById("name");
+const presenceEl = document.getElementById("presence");
+const meEl = document.getElementById("me");
+const weekLabel = document.getElementById("weeklabel");
+const historyEl = document.getElementById("history");
+const confettiHost = document.getElementById("confetti");
 
-  function shuffle(arr) {
-    const a = arr.slice();
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
+// === LOCAL USER ===
+const localId = getOrSet("bingo_user_id", crypto.randomUUID());
+let displayName = getOrSet("bingo_display_name", "");
+nameEl.value = displayName;
+meEl.textContent = `You: ${localId.slice(0,8)}`;
+
+// === STATE ===
+let boardId = null;
+let weekId = null;
+let tiles = [];
+let myMarks = new Set();                // local computed from selections
+let selectionsByTile = {};              // tile_index -> Set<user_id>
+let completedLines = new Set();         // for “new line only” confetti
+let prevBlackout = false;
+
+// === Helpers ===
+function getMonday(d=new Date()) {
+  const n = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const day = n.getUTCDay() || 7; // Sun=0 -> 7
+  n.setUTCDate(n.getUTCDate() - day + 1); // back to Monday
+  return n; // UTC monday
+}
+function fmtDate(date) { return date.toISOString().slice(0,10); }
+function isWeekday(d=new Date()) { const wd = d.getDay(); return wd >= 1 && wd <= 5; }
+function getOrSet(key, val) { const v = localStorage.getItem(key); if (v) return v; localStorage.setItem(key, val); return val; }
+function colorFor(id) { const h = [...id].reduce((a,c)=>a+c.charCodeAt(0),0)%360; return `hsl(${h},70%,55%)`; }
+function burstConfetti(N=90) {
+  for (let i=0;i<N;i++) {
+    const d=document.createElement('div');
+    d.style.position='absolute';d.style.width='8px';d.style.height='8px';
+    d.style.left=Math.random()*100+'%'; d.style.top='-12px';
+    d.style.background=`hsl(${Math.floor(Math.random()*360)},90%,60%)`;
+    d.style.animation=`fall ${1.6 + Math.random()*1.6}s linear forwards`;
+    confettiHost.appendChild(d);
+    setTimeout(()=>d.remove(), 3300);
+  }
+}
+
+// === Bootstrap ===
+await ensureUser();
+await ensureBoard();
+await ensureWeek();
+await subscribeRealtime();
+await loadSelections();
+await loadHistory();
+render();
+
+joinBtn.onclick = async () => {
+  displayName = nameEl.value.trim() || `Player-${localId.slice(0,4)}`;
+  localStorage.setItem("bingo_display_name", displayName);
+  await ensureUser(true);
+  renderPresence(); // optimistic
+};
+
+resetBtn.onclick = async () => {
+  const { error } = await supabase
+    .from("selections")
+    .delete()
+    .eq("week_id", weekId)
+    .eq("user_id", localId);
+  if (error) console.error(error);
+};
+
+shuffleBtn.onclick = async () => {
+  const nextMon = getMonday(new Date(Date.now() + 8.64e7*7));
+  const shuffled = [...tiles].sort(()=>Math.random()-0.5);
+  const { error: e1 } = await supabase
+    .from("weeks")
+    .upsert({ board_id: boardId, week_start: fmtDate(nextMon) })
+    .select("id").single();
+  if (e1) console.error(e1);
+  const { error: e2 } = await supabase.from("boards").update({ tiles: shuffled }).eq("id", boardId);
+  if (e2) console.error(e2);
+  alert("Shuffled board saved for next week.");
+};
+
+async function ensureUser(update=false){
+  const now = new Date().toISOString();
+  const payload = { id: localId, display_name: displayName || `Player-${localId.slice(0,4)}`, last_seen: now };
+  if (update) {
+    await supabase.from("users").upsert(payload);
+  } else {
+    const { data } = await supabase.from("users").select("id").eq("id", localId);
+    if (!data || !data.length) await supabase.from("users").insert(payload);
+    else await supabase.from("users").update({ last_seen: now, display_name: payload.display_name }).eq("id", localId);
+  }
+}
+
+async function ensureBoard(){
+  let { data, error } = await supabase.from("boards").select("id, tiles").eq("title", BOARD_TITLE).maybeSingle();
+  if (error) console.error(error);
+  if (!data) {
+    const { data: ins, error: e2 } = await supabase.from("boards").insert({ title: BOARD_TITLE, tiles: TILES }).select("id, tiles").single();
+    if (e2) console.error(e2);
+    boardId = ins.id; tiles = ins.tiles;
+  } else { boardId = data.id; tiles = data.tiles; }
+}
+
+async function ensureWeek(){
+  const mon = fmtDate(getMonday());
+  let { data, error } = await supabase
+    .from("weeks")
+    .select("id, week_start")
+    .eq("board_id", boardId)
+    .eq("week_start", mon)
+    .maybeSingle();
+  if (error) console.error(error);
+  if (!data) {
+    const { data: ins, error: e2 } = await supabase
+      .from("weeks").insert({ board_id: boardId, week_start: mon }).select("id, week_start").single();
+    if (e2) console.error(e2);
+    weekId = ins.id;
+  } else weekId = data.id;
+
+  weekLabel.textContent = `Week starting ${mon} (Mon–Fri${isWeekday()?'':' — viewing only'})`;
+}
+
+async function loadSelections(){
+  myMarks = new Set();
+  selectionsByTile = {};
+  for (let i=0;i<tiles.length;i++) selectionsByTile[i] = new Set();
+  const { data, error } = await supabase
+    .from("selections")
+    .select("tile_index, user_id, marked")
+    .eq("week_id", weekId);
+  if (error) console.error(error);
+  (data||[]).forEach(r=>{
+    if (r.marked) {
+      selectionsByTile[r.tile_index].add(r.user_id);
+      if (r.user_id === localId) myMarks.add(r.tile_index);
     }
-    return a;
-  }
+  });
+  render();
+}
 
-  function layoutGrid() {
-    gridEl.style.gridTemplateColumns = `repeat(${COLS}, minmax(140px, 1fr))`;
-    gridEl.innerHTML = '';
-    order.forEach((text, idx) => {
-      const btn = document.createElement('button');
-      btn.className = 'tile' + (selected.has(idx) ? ' on' : '');
-      btn.textContent = text;
-      btn.addEventListener('click', () => toggle(idx, btn));
-      gridEl.appendChild(btn);
-    });
-  }
+async function loadHistory(){
+  const { data, error } = await supabase
+    .from("weeks")
+    .select("id, week_start")
+    .eq("board_id", boardId)
+    .order("week_start", { ascending: false })
+    .limit(10);
+  if (error) { console.error(error); return; }
+  historyEl.innerHTML = data.map(w => {
+    return `<div><a href="#" data-week="${w.id}" class="hist">Week ${w.week_start}</a></div>`;
+  }).join("");
+  [...document.querySelectorAll(".hist")].forEach(a=>{
+    a.onclick = async (e)=>{
+      e.preventDefault();
+      weekId = a.getAttribute("data-week");
+      await loadSelections();
+      weekLabel.textContent = `Week starting ${a.textContent.replace('Week ','')} (history)`;
+    };
+  });
+}
 
-  function generateOrder() { order = shuffle(TILES); }
-
-  function toggle(idx, el) {
-    if (selected.has(idx)) { selected.delete(idx); el.classList.remove('on'); }
-    else { selected.add(idx); el.classList.add('on'); }
-    updateStatus();
-  }
-
-  function computeLines() {
-    const lines = [];
-    // Rows
-    for (let r = 0; r < ROWS; r++) {
-      const line = [];
-      for (let c = 0; c < COLS; c++) {
-        const i = r * COLS + c;
-        if (i < order.length) line.push(i);
+async function subscribeRealtime(){
+  supabase.channel("selections")
+    .on("postgres_changes", { event: "*", schema: "public", table: "selections", filter: `week_id=eq.${weekId}` }, payload => {
+      const r = payload.new || payload.old;
+      if (!r) return;
+      const set = selectionsByTile[r.tile_index] || new Set();
+      if (payload.eventType === "DELETE" || (payload.new && payload.new.marked === false)) {
+        set.delete(r.user_id);
+        if (r.user_id === localId) myMarks.delete(r.tile_index);
+      } else {
+        set.add(r.user_id);
+        if (r.user_id === localId) myMarks.add(r.tile_index);
       }
-      if (line.length === COLS) lines.push(line);
-    }
-    // Cols
-    for (let c = 0; c < COLS; c++) {
-      const line = [];
-      for (let r = 0; r < ROWS; r++) {
-        const i = r * COLS + c;
-        if (i < order.length) line.push(i);
-      }
-      if (line.length === ROWS) lines.push(line);
-    }
-    // Diagonals
-    const diagLen = Math.min(ROWS, COLS);
-    const d1 = []; const d2 = [];
-    for (let i = 0; i < diagLen; i++) {
-      d1.push(i * COLS + i);
-      d2.push(i * COLS + (COLS - 1 - i));
-    }
-    if (d1.every(idx => idx < order.length)) lines.push(d1);
-    if (d2.every(idx => idx < order.length)) lines.push(d2);
-    return lines;
-  }
+      selectionsByTile[r.tile_index] = set;
+      confettiIfNewLineOrBlackout();
+      render();
+    })
+    .subscribe();
 
-  const LINES = computeLines();
+  setInterval(async ()=>{
+    await supabase.from("users").update({ last_seen: new Date().toISOString() }).eq("id", localId);
+    renderPresence();
+  }, 15000);
+  renderPresence();
+}
 
-  function updateStatus() {
-    const isLine = (line) => line.every(i => selected.has(i));
-    const currentComplete = [];
-    LINES.forEach((line, idx) => { if (isLine(line)) currentComplete.push(idx); });
+function render(){
+  gridEl.innerHTML = "";
+  tiles.forEach((t, i) => {
+    const on = myMarks.has(i);
+    const who = [...(selectionsByTile[i]||[])];
+    const el = document.createElement("button");
+    el.className = "tile" + (on ? " on" : "");
+    el.innerHTML = `
+      <div style="flex:1;display:grid;place-items:center;"><div>${t}</div></div>
+      <div class="who">
+        ${who.map(uid=>`<span class="badge" style="border-color:${colorFor(uid)}80;color:${colorFor(uid)};background:${colorFor(uid)}20">${(uid.match(/[A-Z0-9]/gi)||['?'])[0]}</span>`).join("")}
+      </div>`;
+    el.onclick = async () => {
+      if (!isWeekday()) return alert("Clicks only allowed Mon–Fri for the active week.");
+      await supabase.rpc("toggle_selection", { _week: weekId, _user: localId, _tile: i });
+    };
+    gridEl.appendChild(el);
+  });
+}
 
-    // New lines since last update
-    const currentSet = new Set(currentComplete);
-    const newlyCompleted = currentComplete.filter(idx => !completedLines.has(idx));
-    completedLines = currentSet;
+function renderPresence(){
+  const since = new Date(Date.now()-30000).toISOString();
+  supabase.from("users").select("id, display_name, last_seen").then(({data})=>{
+    const rows = (data||[]).sort((a,b)=> (b.last_seen||'').localeCompare(a.last_seen||''));
+    presenceEl.innerHTML = rows.map(u=>{
+      const online = (u.last_seen||'') > since;
+      return `<li><span>${u.display_name}</span><span style="color:${online?'#4ade80':'#a3a3ad'}">${online?'Online':'Away'}</span></li>`;
+    }).join("") || "<div class='muted'>No one yet. Click Join.</div>";
+  });
+}
 
-    countEl.textContent = currentComplete.length;
+function confettiIfNewLineOrBlackout() {
+  const lines = [
+    [0,1,2,3,4],[5,6,7,8,9],[10,11,12,13,14],
+    [0,5,10,15,20],[1,6,11,16,21],[2,7,12,17,22],[3,8,13,18,23],[4,9,14,19,24],
+    [0,6,12,18,24],[4,8,12,16,20]
+  ].filter(line => line.every(i => i < tiles.length));
+  const isLine = (line)=> line.every(i => myMarks.has(i));
+  const current = lines.map((_,idx)=> ({idx, ok:isLine(lines[idx])})).filter(x=>x.ok).map(x=>x.idx);
+  const newOnes = current.filter(idx => !completedLines.has(idx));
+  current.forEach(idx => completedLines.add(idx));
+  if (newOnes.length > 0) burstConfetti(80);
 
-    const isBlackout = selected.size === order.length && order.length > 0;
-    blackoutVal.textContent = isBlackout ? 'YES' : 'NO';
-    blackoutTag.classList.toggle('on', isBlackout);
-
-    if (newlyCompleted.length > 0) burstConfetti(80);
-    if (!prevBlackout && isBlackout) burstConfetti(140);
-    prevBlackout = isBlackout;
-  }
-
-  function reset() {
-    selected = new Set();
-    completedLines = new Set();
-    prevBlackout = false;
-    countEl.textContent = '0';
-    blackoutVal.textContent = 'NO';
-    blackoutTag.classList.remove('on');
-    layoutGrid();
-  }
-  function reshuffle() { generateOrder(); reset(); }
-
-  function burstConfetti(N = 90) {
-    if (!confettiHost) return;
-    for (let i = 0; i < N; i++) {
-      const piece = document.createElement('div');
-      piece.style.position = 'absolute'; piece.style.width = '8px'; piece.style.height = '8px';
-      piece.style.opacity = '0.9'; piece.style.left = Math.random() * 100 + '%'; piece.style.top = '-12px';
-      piece.style.transform = `rotate(${Math.random() * 360}deg)`;
-      piece.style.background = `hsl(${Math.floor(Math.random() * 360)}, 90%, 60%)`;
-      piece.style.animation = `fall ${1.6 + Math.random() * 1.6}s linear forwards`;
-      confettiHost.appendChild(piece);
-      setTimeout(() => piece.remove(), 3300);
-    }
-  }
-
-  // Init
-  generateOrder();
-  layoutGrid();
-
-  document.getElementById('shuffleBtn').addEventListener('click', reshuffle);
-  document.getElementById('resetBtn').addEventListener('click', reset);
+  const blackout = myMarks.size === tiles.length && tiles.length > 0;
+  if (blackout && !prevBlackout) burstConfetti(140);
+  prevBlackout = blackout;
+}
 </script>
 </body>
 </html>
