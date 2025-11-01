@@ -23,84 +23,32 @@
     background: radial-gradient(1200px 800px at 20% -10%, #1a1a20, transparent), linear-gradient(#0b0b0c, #111113 16%, #0d0d10 100%);
     background-attachment: fixed;
   }
-  .wrap {
-    max-width: 1100px;
-    margin: 0 auto;
-    padding: 28px 20px 60px;
-  }
-  h1 {
-    margin: 0;
-    font-size: clamp(24px, 3vw, 38px);
-    letter-spacing: 0.2px;
-  }
-  .sub {
-    color: var(--muted);
-    margin-top: 6px;
-    font-size: 14px;
-  }
-  .controls {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    align-items: center;
-    margin-top: 14px;
-  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
+  h1 { margin: 0; font-size: clamp(24px, 3vw, 38px); letter-spacing: 0.2px; }
+  .sub { color: var(--muted); margin-top: 6px; font-size: 14px; }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
   button {
-    background: var(--card);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 10px 14px;
-    border-radius: 16px;
-    cursor: pointer;
-    font-weight: 600;
+    background: var(--card); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 14px; border-radius: 16px; cursor: pointer; font-weight: 600;
   }
   button:hover { background: #26262c; }
-  .score {
-    padding: 10px 14px;
-    border-radius: 16px;
-    border: 1px solid var(--border);
-    color: var(--muted);
-    background: var(--card);
-    font-weight: 600;
+  .score, .blackout {
+    padding: 10px 14px; border-radius: 16px; border: 1px solid var(--border);
+    color: var(--muted); background: var(--card); font-weight: 600;
   }
-  .grid {
-    margin-top: 20px;
-    display: grid;
-    gap: 10px;
-  }
+  .blackout.on { background: rgba(74,222,128,.16); border-color: rgba(74,222,128,.7); color: #bdf7cf; }
+  .grid { margin-top: 20px; display: grid; gap: 10px; }
   .tile {
-    min-height: 90px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    padding: 12px;
-    border-radius: 18px;
-    border: 1px solid var(--border);
-    background: #1a1a1f;
-    transition: background .15s ease, border-color .15s ease, transform .05s ease;
-    user-select: none;
-    font-size: clamp(13px, 2.3vw, 18px);
-    line-height: 1.2;
+    min-height: 90px; display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 12px; border-radius: 18px; border: 1px solid var(--border);
+    background: #1a1a1f; transition: background .15s ease, border-color .15s ease, transform .05s ease;
+    user-select: none; font-size: clamp(13px, 2.3vw, 18px); line-height: 1.2;
   }
-  .tile:hover {
-    background: #22222a;
-  }
-  .tile.on {
-    background: rgba(74, 222, 128, 0.16);
-    border-color: rgba(74, 222, 128, 0.7);
-    color: #bdf7cf;
-    transform: translateY(-1px);
-  }
-  .footer {
-    margin-top: 16px;
-    color: var(--muted);
-    font-size: 13px;
-  }
+  .tile:hover { background: #22222a; }
+  .tile.on { background: rgba(74, 222, 128, 0.16); border-color: rgba(74, 222, 128, 0.7); color: #bdf7cf; transform: translateY(-1px); }
+  .footer { margin-top: 16px; color: var(--muted); font-size: 13px; }
   .confetti-host { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
-  @keyframes fall {
-    to { transform: translateY(110vh) rotate(720deg); opacity: .9; }
-  }
+  @keyframes fall { to { transform: translateY(110vh) rotate(720deg); opacity: .9; } }
 </style>
 </head>
 <body>
@@ -108,11 +56,12 @@
 <div class="wrap">
   <header>
     <h1>🎙️ Cinderella's Stand-Up Bingo</h1>
-    <p class="sub">Click squares to mark. Get a full row/column/diagonal to celebrate with confetti. Shuffle for a new layout.</p>
+    <p class="sub">Bingo if you complete any full line <em>or</em> get a blackout (all squares). Click to mark, shuffle for new layout.</p>
     <div class="controls">
       <button id="shuffleBtn" title="Randomise tile positions">🔀 Shuffle</button>
       <button id="resetBtn" title="Clear your marks">♻️ Reset</button>
-      <div class="score">Bingos: <span id="bingoCount">0</span></div>
+      <div class="score">Lines: <span id="bingoCount">0</span></div>
+      <div id="blackoutTag" class="blackout">Blackout: <span id="blackoutVal">NO</span></div>
     </div>
   </header>
 
@@ -143,16 +92,19 @@
     "Laptop doing updates",
   ];
 
-  // We'll render a compact grid: 5 columns by ceil(TILES.length / 5) rows
   const COLS = 5;
   const ROWS = Math.ceil(TILES.length / COLS);
 
   const gridEl = document.getElementById('grid');
   const countEl = document.getElementById('bingoCount');
+  const blackoutVal = document.getElementById('blackoutVal');
+  const blackoutTag = document.getElementById('blackoutTag');
   const confettiHost = document.getElementById('confetti');
 
   let order = [];
   let selected = new Set();
+  let completedLines = new Set(); // track which line indices are already counted
+  let prevBlackout = false;
 
   function shuffle(arr) {
     const a = arr.slice();
@@ -175,22 +127,14 @@
     });
   }
 
-  function generateOrder() {
-    order = shuffle(TILES);
-  }
+  function generateOrder() { order = shuffle(TILES); }
 
   function toggle(idx, el) {
-    if (selected.has(idx)) {
-      selected.delete(idx);
-      el.classList.remove('on');
-    } else {
-      selected.add(idx);
-      el.classList.add('on');
-    }
-    updateBingoCount();
+    if (selected.has(idx)) { selected.delete(idx); el.classList.remove('on'); }
+    else { selected.add(idx); el.classList.add('on'); }
+    updateStatus();
   }
 
-  // Compute lines for dynamic ROWS x COLS grid
   function computeLines() {
     const lines = [];
     // Rows
@@ -211,56 +155,58 @@
       }
       if (line.length === ROWS) lines.push(line);
     }
-    // Major diagonal (top-left to bottom-right) — only if rectangle complete
-    const diag1 = [];
-    for (let i = 0; i < Math.min(ROWS, COLS); i++) {
-      const idx = i * COLS + i;
-      if (idx < order.length) diag1.push(idx);
+    // Diagonals
+    const diagLen = Math.min(ROWS, COLS);
+    const d1 = []; const d2 = [];
+    for (let i = 0; i < diagLen; i++) {
+      d1.push(i * COLS + i);
+      d2.push(i * COLS + (COLS - 1 - i));
     }
-    if (diag1.length === Math.min(ROWS, COLS)) lines.push(diag1);
-
-    // Minor diagonal (top-right to bottom-left)
-    const diag2 = [];
-    for (let i = 0; i < Math.min(ROWS, COLS); i++) {
-      const idx = i * COLS + (COLS - 1 - i);
-      if (idx < order.length) diag2.push(idx);
-    }
-    if (diag2.length === Math.min(ROWS, COLS)) lines.push(diag2);
-
+    if (d1.every(idx => idx < order.length)) lines.push(d1);
+    if (d2.every(idx => idx < order.length)) lines.push(d2);
     return lines;
   }
 
   const LINES = computeLines();
 
-  function updateBingoCount() {
+  function updateStatus() {
     const isLine = (line) => line.every(i => selected.has(i));
-    const count = LINES.filter(isLine).length;
-    countEl.textContent = count;
-    if (count > 0) burstConfetti();
+    const currentComplete = [];
+    LINES.forEach((line, idx) => { if (isLine(line)) currentComplete.push(idx); });
+
+    // New lines since last update
+    const currentSet = new Set(currentComplete);
+    const newlyCompleted = currentComplete.filter(idx => !completedLines.has(idx));
+    completedLines = currentSet;
+
+    countEl.textContent = currentComplete.length;
+
+    const isBlackout = selected.size === order.length && order.length > 0;
+    blackoutVal.textContent = isBlackout ? 'YES' : 'NO';
+    blackoutTag.classList.toggle('on', isBlackout);
+
+    if (newlyCompleted.length > 0) burstConfetti(80);
+    if (!prevBlackout && isBlackout) burstConfetti(140);
+    prevBlackout = isBlackout;
   }
 
   function reset() {
     selected = new Set();
+    completedLines = new Set();
+    prevBlackout = false;
     countEl.textContent = '0';
+    blackoutVal.textContent = 'NO';
+    blackoutTag.classList.remove('on');
     layoutGrid();
   }
+  function reshuffle() { generateOrder(); reset(); }
 
-  function reshuffle() {
-    generateOrder();
-    reset();
-  }
-
-  function burstConfetti() {
+  function burstConfetti(N = 90) {
     if (!confettiHost) return;
-    const N = 90;
     for (let i = 0; i < N; i++) {
       const piece = document.createElement('div');
-      piece.style.position = 'absolute';
-      piece.style.width = '8px';
-      piece.style.height = '8px';
-      piece.style.opacity = '0.9';
-      piece.style.left = Math.random() * 100 + '%';
-      piece.style.top = '-12px';
+      piece.style.position = 'absolute'; piece.style.width = '8px'; piece.style.height = '8px';
+      piece.style.opacity = '0.9'; piece.style.left = Math.random() * 100 + '%'; piece.style.top = '-12px';
       piece.style.transform = `rotate(${Math.random() * 360}deg)`;
       piece.style.background = `hsl(${Math.floor(Math.random() * 360)}, 90%, 60%)`;
       piece.style.animation = `fall ${1.6 + Math.random() * 1.6}s linear forwards`;
@@ -273,7 +219,6 @@
   generateOrder();
   layoutGrid();
 
-  // Bind controls
   document.getElementById('shuffleBtn').addEventListener('click', reshuffle);
   document.getElementById('resetBtn').addEventListener('click', reset);
 </script>
