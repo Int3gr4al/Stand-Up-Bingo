@@ -19,13 +19,14 @@
   .tile.on { background: rgba(74, 222, 128, .16); border-color: rgba(74,222,128,.7); color:#c9f6d9; }
   .who { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; padding-bottom:4px; }
   .badge { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid #ffffff40;
-           max-width: 140px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+           max-width: 160px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .panel { background:#101018; border:1px solid #2a2a34; border-radius:16px; padding:12px; }
   .presence li { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px dashed #2a2a34; }
   .presence li:last-child { border-bottom:0; }
   .presence .actions button { padding:6px 8px; border-radius:10px; }
   .right { display:grid; gap:10px; }
   .confetti { position:fixed; inset:0; pointer-events:none; overflow:hidden; }
+  footer { margin-top:16px; color:#777; font-size:12px; text-align:center; }
   @keyframes fall { to { transform: translateY(110vh) rotate(720deg); opacity:.9; } }
 </style>
 </head>
@@ -38,7 +39,7 @@
     <div class="controls">
       <input id="name" placeholder="Display name" />
       <button id="join">Join</button>
-      <button id="reset">Reset marks</button>
+      <button id="reset">Reset my marks</button>
       <button id="shuffle" title="Reorder tiles for future weeks only">Shuffle next week</button>
       <button id="adminBtn" title="Admin login / logout">Admin</button>
       <span id="adminState" class="muted" style="margin-left:6px;"></span>
@@ -46,10 +47,11 @@
     </div>
   </header>
 
-  <main style="display:grid; grid-template-columns: 1fr 300px; gap:16px; align-items:start;">
+  <main style="display:grid; grid-template-columns: 1fr 320px; gap:16px; align-items:start;">
     <section>
       <div id="grid" class="grid"></div>
-      <div class="muted" style="margin-top:8px;">Lines and blackout detected per user; names show who marked each tile.</div>
+      <div class="muted" style="margin-top:8px;">Lines & blackout detected per user; names show who marked each tile.</div>
+      <footer>v3.2 — lines=“new only” confetti; admin delete & tile editor</footer>
     </section>
 
     <aside class="right">
@@ -60,9 +62,24 @@
         </div>
         <ul id="presence" class="presence" style="list-style:none; padding:0; margin:10px 0 0;"></ul>
       </div>
+
       <div class="panel">
         <strong>History</strong>
         <div id="history" class="muted" style="margin-top:8px; font-size:14px;">—</div>
+      </div>
+
+      <!-- Admin Tile Editor -->
+      <div class="panel" id="tileEditor" style="display:none;">
+        <strong>Tile Editor (admin)</strong>
+        <div id="tileList" class="muted" style="margin-top:8px; font-size:14px;"></div>
+        <div style="display:flex; gap:8px; margin-top:10px;">
+          <input id="newTile" placeholder="Add a new tile…" style="flex:1;" />
+          <button id="addTileBtn">Add</button>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:10px;">
+          <button id="saveTilesNow" title="Updates tiles and clears this week's marks">Save & apply now</button>
+        </div>
+        <small class="muted">Applying now clears everyone's marks for this week (keeps board consistent).</small>
       </div>
     </aside>
   </main>
@@ -78,7 +95,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* === CONFIG === */
 const BOARD_TITLE = "Cinderella’s Stand-Up Bingo";
-const TILES = [
+const DEFAULT_TILES = [
   "Bits and bobs","BAU","Technical Issues","I've got a Dr's appointment","Headache",
   "Eyes hurting","Not feeling great today","Lots of emails to go through","Meetings","Pen Test",
   "Not sure who's been","Teams having issues","Talking over / coughing over people","On mute","Laptop doing updates"
@@ -97,6 +114,11 @@ const meEl = document.getElementById("me");
 const weekLabel = document.getElementById("weeklabel");
 const historyEl = document.getElementById("history");
 const confettiHost = document.getElementById("confetti");
+const tileEditor = document.getElementById("tileEditor");
+const tileList = document.getElementById("tileList");
+const newTileInput = document.getElementById("newTile");
+const addTileBtn = document.getElementById("addTileBtn");
+const saveTilesNowBtn = document.getElementById("saveTilesNow");
 
 /* === LOCAL USER === */
 const localId = getOrSet("bingo_user_id", crypto.randomUUID());
@@ -114,6 +136,9 @@ let completedLines = new Set();    // for “new line only” confetti
 let prevBlackout = false;
 let usersById = {};                // user_id -> {display_name, last_seen}
 let adminToken = null;             // set after login
+
+// Tile editor working copy
+let editTiles = [];
 
 /* === Helpers === */
 function getMonday(d=new Date()) {
@@ -135,6 +160,9 @@ function burstConfetti(N=90) {
     setTimeout(()=>d.remove(), 3300);
   }
 }
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 
 /* === Bootstrap === */
 await ensureUser();
@@ -143,6 +171,7 @@ await ensureWeek();
 await subscribeRealtime();
 await loadSelections();
 await loadHistory();
+editTiles = [...tiles]; // seed editor from current board tiles
 render();
 
 /* === UI actions === */
@@ -180,6 +209,7 @@ adminBtn.onclick = async () => {
   if (adminToken) {
     adminToken = null;
     adminState.textContent = "(admin: logged out)";
+    tileEditor.style.display = "none";
     renderPresence();
     return;
   }
@@ -187,16 +217,18 @@ adminBtn.onclick = async () => {
   if (!token) return;
 
   const { data, error } = await supabase.rpc("admin_check_token", { p_token: token });
-  if (error) return alert("Token check failed: " + (error.message || error));
+  if (error) { alert("Token check failed: " + (error.message || error)); return; }
+
   if (data === true) {
     adminToken = token;
     adminState.textContent = "(admin: logged in)";
+    tileEditor.style.display = "block";
+    renderTileEditor();
     renderPresence();
   } else {
     alert("Invalid admin token");
   }
 };
-
 
 /* === Data bootstrap === */
 async function ensureUser(update=false){
@@ -215,7 +247,7 @@ async function ensureBoard(){
   let { data, error } = await supabase.from("boards").select("id, tiles").eq("title", BOARD_TITLE).maybeSingle();
   if (error) console.error(error);
   if (!data) {
-    const { data: ins, error: e2 } = await supabase.from("boards").insert({ title: BOARD_TITLE, tiles: TILES }).select("id, tiles").single();
+    const { data: ins, error: e2 } = await supabase.from("boards").insert({ title: BOARD_TITLE, tiles: DEFAULT_TILES }).select("id, tiles").single();
     if (e2) console.error(e2);
     boardId = ins.id; tiles = ins.tiles;
   } else { boardId = data.id; tiles = data.tiles; }
@@ -305,7 +337,7 @@ async function subscribeRealtime(){
   renderPresence();
 }
 
-/* Presence now fills usersById so tiles can show **names** and admin can delete */
+/* Presence fills usersById for names + admin actions */
 function renderPresence(){
   const since = new Date(Date.now()-30000).toISOString();
   supabase.from("users").select("id, display_name, last_seen").then(({data})=>{
@@ -320,22 +352,71 @@ function renderPresence(){
     }).join("") || "<div class='muted'>No one yet. Click Join.</div>";
 
     adminState.textContent = adminToken ? "(admin: logged in)" : "(admin: logged out)";
+    tileEditor.style.display = adminToken ? "block" : "none";
   });
 }
 
-/* Expose a tiny helper for the inline onclick above */
+/* Admin remove user */
 window.__removeUser = async (uid, encName) => {
   if (!adminToken) return alert("Admin not logged in");
   const name = decodeURIComponent(encName);
   if (!confirm(`Really remove user “${name}”? This also deletes their marks.`)) return;
   const { error } = await supabase.rpc("admin_remove_user", { p_token: adminToken, p_user: uid });
   if (error) { alert("Delete failed: " + (error.message || error)); return; }
-  // Refresh lists
   await loadSelections();
   renderPresence();
   render();
 };
 
+/* Tile Editor */
+function renderTileEditor() {
+  if (!adminToken) { tileEditor.style.display = "none"; return; }
+  if (!editTiles.length) editTiles = [...tiles];
+  tileList.innerHTML = editTiles.map((t, i) => {
+    return `
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px dashed #2a2a34;">
+        <span>${escapeHtml(t)}</span>
+        <button title="Remove tile" onclick="window.__removeTile(${i})">🗑</button>
+      </div>
+    `;
+  }).join("") || "<div>— no tiles —</div>";
+}
+window.__removeTile = (idx) => {
+  if (!adminToken) return alert("Admin not logged in");
+  editTiles.splice(idx, 1);
+  renderTileEditor();
+};
+addTileBtn.onclick = () => {
+  if (!adminToken) return alert("Admin not logged in");
+  const val = (newTileInput.value || "").trim();
+  if (!val) return;
+  editTiles.push(val);
+  newTileInput.value = "";
+  renderTileEditor();
+};
+saveTilesNowBtn.onclick = async () => {
+  if (!adminToken) return alert("Admin not logged in");
+  if (editTiles.length === 0) return alert("You need at least one tile.");
+  if (!confirm("Apply new tiles now?\nThis will reset everyone's marks for the current week.")) return;
+
+  const { error: e1 } = await supabase.from("boards").update({ tiles: editTiles }).eq("id", boardId);
+  if (e1) { alert("Failed to update tiles: " + (e1.message || e1)); return; }
+
+  const { error: e2 } = await supabase.from("selections").delete().eq("week_id", weekId);
+  if (e2) { alert("Failed to clear marks: " + (e2.message || e2)); return; }
+
+  tiles = [...editTiles];
+  myMarks = new Set();
+  selectionsByTile = {};
+  for (let i=0;i<tiles.length;i++) selectionsByTile[i] = new Set();
+  completedLines = new Set();
+  prevBlackout = false;
+
+  render();
+  alert("Tiles updated and marks cleared for this week.");
+};
+
+/* Render board */
 function render(){
   gridEl.innerHTML = "";
   tiles.forEach((t, i) => {
