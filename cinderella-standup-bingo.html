@@ -51,7 +51,7 @@
     <section>
       <div id="grid" class="grid"></div>
       <div class="muted" style="margin-top:8px;">Lines & blackout detected per user; names show who marked each tile.</div>
-      <footer>v3.2 — lines=“new only” confetti; admin delete & tile editor</footer>
+      <footer>v3.3 — admin delete & tile editor; preserves clicks on live edits</footer>
     </section>
 
     <aside class="right">
@@ -77,9 +77,9 @@
           <button id="addTileBtn">Add</button>
         </div>
         <div style="display:flex; gap:8px; margin-top:10px;">
-          <button id="saveTilesNow" title="Updates tiles and clears this week's marks">Save & apply now</button>
+          <button id="saveTilesNow" title="Updates tiles and preserves current clicks">Save & apply now</button>
         </div>
-        <small class="muted">Applying now clears everyone's marks for this week (keeps board consistent).</small>
+        <small class="muted">Applying now keeps existing marks; only removed tiles lose their marks.</small>
       </div>
     </aside>
   </main>
@@ -390,30 +390,58 @@ addTileBtn.onclick = () => {
   if (!adminToken) return alert("Admin not logged in");
   const val = (newTileInput.value || "").trim();
   if (!val) return;
-  editTiles.push(val);
+  editTiles.push(val); // appends to end by design
   newTileInput.value = "";
   renderTileEditor();
 };
 saveTilesNowBtn.onclick = async () => {
   if (!adminToken) return alert("Admin not logged in");
   if (editTiles.length === 0) return alert("You need at least one tile.");
-  if (!confirm("Apply new tiles now?\nThis will reset everyone's marks for the current week.")) return;
+  if (!confirm("Apply new tiles now?\nExisting marks will be kept where possible. Removed tiles will lose their marks.")) return;
 
-  const { error: e1 } = await supabase.from("boards").update({ tiles: editTiles }).eq("id", boardId);
+  // 1) Build mapping and removed indexes
+  const oldTiles = [...tiles];
+  const newTiles = [...editTiles]; // new ones append at the end
+  const removedIndexes = [];
+  oldTiles.forEach((t, i) => { if (!newTiles.includes(t)) removedIndexes.push(i); });
+
+  // 2) Update DB tiles first
+  const { error: e1 } = await supabase.from("boards").update({ tiles: newTiles }).eq("id", boardId);
   if (e1) { alert("Failed to update tiles: " + (e1.message || e1)); return; }
 
-  const { error: e2 } = await supabase.from("selections").delete().eq("week_id", weekId);
-  if (e2) { alert("Failed to clear marks: " + (e2.message || e2)); return; }
+  // 3) Delete selections for removed tiles (current week only)
+  if (removedIndexes.length > 0) {
+    const { error: e2 } = await supabase.from("selections").delete().eq("week_id", weekId).in("tile_index", removedIndexes);
+    if (e2) console.warn("Couldn't delete old tile marks:", e2.message || e2);
+  }
 
-  tiles = [...editTiles];
+  // 4) Remap local selections to new indexes by tile text identity
+  const newIndexByName = Object.fromEntries(newTiles.map((t, i) => [t, i]));
+  const remappedSelections = {};
+  for (let i = 0; i < newTiles.length; i++) remappedSelections[i] = new Set();
+
+  for (const [oldIdxStr, users] of Object.entries(selectionsByTile)) {
+    const oldIdx = Number(oldIdxStr);
+    const name = oldTiles[oldIdx];
+    const newIdx = newIndexByName[name];
+    if (newIdx !== undefined) {
+      (users || new Set()).forEach(u => remappedSelections[newIdx].add(u));
+    }
+  }
+
+  selectionsByTile = remappedSelections;
+  tiles = newTiles;
+  editTiles = [...tiles];
+
+  // 5) Update myMarks set
   myMarks = new Set();
-  selectionsByTile = {};
-  for (let i=0;i<tiles.length;i++) selectionsByTile[i] = new Set();
-  completedLines = new Set();
-  prevBlackout = false;
+  for (let i = 0; i < tiles.length; i++) {
+    if (selectionsByTile[i] && selectionsByTile[i].has(localId)) myMarks.add(i);
+  }
 
+  renderTileEditor();
   render();
-  alert("Tiles updated and marks cleared for this week.");
+  alert("Tiles updated. Existing marks preserved where possible.");
 };
 
 /* Render board */
