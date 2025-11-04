@@ -51,7 +51,7 @@
     <section>
       <div id="grid" class="grid"></div>
       <div class="muted" style="margin-top:8px;">Lines & blackout detected per user; names show who marked each tile.</div>
-      <footer>v3.3 — admin delete & tile editor; preserves clicks on live edits</footer>
+      <footer>v3.4 — tile edits preserve marks by name; admin tools</footer>
     </section>
 
     <aside class="right">
@@ -397,33 +397,37 @@ addTileBtn.onclick = () => {
 saveTilesNowBtn.onclick = async () => {
   if (!adminToken) return alert("Admin not logged in");
   if (editTiles.length === 0) return alert("You need at least one tile.");
-  if (!confirm("Apply new tiles now?\nExisting marks will be kept where possible. Removed tiles will lose their marks.")) return;
+  if (!confirm("Apply new tiles now?\nExisting marks will be preserved where names match.")) return;
 
-  // 1) Build mapping and removed indexes
+  // Old and new lists
   const oldTiles = [...tiles];
-  const newTiles = [...editTiles]; // new ones append at the end
+  const newTiles = [...editTiles]; // new tiles append at the end
+
+  // Find removed old indexes
   const removedIndexes = [];
   oldTiles.forEach((t, i) => { if (!newTiles.includes(t)) removedIndexes.push(i); });
 
-  // 2) Update DB tiles first
+  // Update board tiles in DB first
   const { error: e1 } = await supabase.from("boards").update({ tiles: newTiles }).eq("id", boardId);
   if (e1) { alert("Failed to update tiles: " + (e1.message || e1)); return; }
 
-  // 3) Delete selections for removed tiles (current week only)
+  // Delete selections for removed tiles (current week only)
   if (removedIndexes.length > 0) {
     const { error: e2 } = await supabase.from("selections").delete().eq("week_id", weekId).in("tile_index", removedIndexes);
-    if (e2) console.warn("Couldn't delete old tile marks:", e2.message || e2);
+    if (e2) console.warn("Couldn't delete removed tiles:", e2.message || e2);
   }
 
-  // 4) Remap local selections to new indexes by tile text identity
-  const newIndexByName = Object.fromEntries(newTiles.map((t, i) => [t, i]));
+  // Build mapping of tile text -> new index (preserves marks even if order changed)
+  const newIndexByText = Object.fromEntries(newTiles.map((t, i) => [t, i]));
+
+  // Remap local selections to the new indexes
   const remappedSelections = {};
   for (let i = 0; i < newTiles.length; i++) remappedSelections[i] = new Set();
 
   for (const [oldIdxStr, users] of Object.entries(selectionsByTile)) {
     const oldIdx = Number(oldIdxStr);
     const name = oldTiles[oldIdx];
-    const newIdx = newIndexByName[name];
+    const newIdx = newIndexByText[name];
     if (newIdx !== undefined) {
       (users || new Set()).forEach(u => remappedSelections[newIdx].add(u));
     }
@@ -433,15 +437,16 @@ saveTilesNowBtn.onclick = async () => {
   tiles = newTiles;
   editTiles = [...tiles];
 
-  // 5) Update myMarks set
+  // Rebuild myMarks
   myMarks = new Set();
-  for (let i = 0; i < tiles.length; i++) {
+  for (let i = 0; i => i < tiles.length; i++) {
     if (selectionsByTile[i] && selectionsByTile[i].has(localId)) myMarks.add(i);
   }
 
   renderTileEditor();
   render();
-  alert("Tiles updated. Existing marks preserved where possible.");
+
+  alert("Tiles updated — marks preserved by tile name.");
 };
 
 /* Render board */
