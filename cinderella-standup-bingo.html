@@ -18,7 +18,8 @@
           min-height:110px; padding:10px; text-align:center; border:1px solid #2a2a34; border-radius:14px; background:#14141a; }
   .tile.on { background: rgba(74, 222, 128, .16); border-color: rgba(74,222,128,.7); color:#c9f6d9; }
   .who { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; padding-bottom:4px; }
-  .badge { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid #ffffff40; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid #ffffff40;
+           max-width: 140px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .panel { background:#101018; border:1px solid #2a2a34; border-radius:16px; padding:12px; }
   .presence li { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dashed #2a2a34; }
   .presence li:last-child { border-bottom:0; }
@@ -45,7 +46,7 @@
   <main style="display:grid; grid-template-columns: 1fr 300px; gap:16px; align-items:start;">
     <section>
       <div id="grid" class="grid"></div>
-      <div class="muted" style="margin-top:8px;">Lines and blackout detected per user; initials show who marked each tile.</div>
+      <div class="muted" style="margin-top:8px;">Lines and blackout detected per user; **names** show who marked each tile.</div>
     </section>
 
     <aside class="right">
@@ -67,11 +68,12 @@
 <script type="module">
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+/* === YOUR SUPABASE PROJECT === */
 const SUPABASE_URL = "https://xkqejhirtnlxuzyzbfju.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhrcWVqaGlydG5seHV6eXpiZmp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5OTQxODUsImV4cCI6MjA3NzU3MDE4NX0.a0O8w_Mxi3YQwuBorpyITIT7HxAqlcNaSCbKhHTiOVU";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// === CONFIG ===
+/* === CONFIG === */
 const BOARD_TITLE = "Cinderella’s Stand-Up Bingo";
 const TILES = [
   "Bits and bobs","BAU","Technical Issues","I've got a Dr's appointment","Headache",
@@ -79,7 +81,7 @@ const TILES = [
   "Not sure who's been","Teams having issues","Talking over / coughing over people","On mute","Laptop doing updates"
 ];
 
-// === DOM ===
+/* === DOM === */
 const gridEl = document.getElementById("grid");
 const joinBtn = document.getElementById("join");
 const resetBtn = document.getElementById("reset");
@@ -91,27 +93,28 @@ const weekLabel = document.getElementById("weeklabel");
 const historyEl = document.getElementById("history");
 const confettiHost = document.getElementById("confetti");
 
-// === LOCAL USER ===
+/* === LOCAL USER === */
 const localId = getOrSet("bingo_user_id", crypto.randomUUID());
 let displayName = getOrSet("bingo_display_name", "");
 nameEl.value = displayName;
-meEl.textContent = `You: ${localId.slice(0,8)}`;
+meEl.textContent = `You: ${displayName || localId.slice(0,8)}`;
 
-// === STATE ===
+/* === STATE === */
 let boardId = null;
 let weekId = null;
 let tiles = [];
-let myMarks = new Set();                // local computed from selections
-let selectionsByTile = {};              // tile_index -> Set<user_id>
-let completedLines = new Set();         // for “new line only” confetti
+let myMarks = new Set();           // computed from selections
+let selectionsByTile = {};         // tile_index -> Set<user_id>
+let completedLines = new Set();    // for “new line only” confetti
 let prevBlackout = false;
+let usersById = {};                // user_id -> {display_name, last_seen}
 
-// === Helpers ===
+/* === Helpers === */
 function getMonday(d=new Date()) {
   const n = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
   const day = n.getUTCDay() || 7; // Sun=0 -> 7
-  n.setUTCDate(n.getUTCDate() - day + 1); // back to Monday
-  return n; // UTC monday
+  n.setUTCDate(n.getUTCDate() - day + 1);
+  return n;
 }
 function fmtDate(date) { return date.toISOString().slice(0,10); }
 function isWeekday(d=new Date()) { const wd = d.getDay(); return wd >= 1 && wd <= 5; }
@@ -129,7 +132,7 @@ function burstConfetti(N=90) {
   }
 }
 
-// === Bootstrap ===
+/* === Bootstrap === */
 await ensureUser();
 await ensureBoard();
 await ensureWeek();
@@ -141,8 +144,9 @@ render();
 joinBtn.onclick = async () => {
   displayName = nameEl.value.trim() || `Player-${localId.slice(0,4)}`;
   localStorage.setItem("bingo_display_name", displayName);
+  meEl.textContent = `You: ${displayName}`;
   await ensureUser(true);
-  renderPresence(); // optimistic
+  renderPresence(); // optimistic refresh
 };
 
 resetBtn.onclick = async () => {
@@ -248,6 +252,7 @@ async function loadHistory(){
 }
 
 async function subscribeRealtime(){
+  // Realtime selections for current week
   supabase.channel("selections")
     .on("postgres_changes", { event: "*", schema: "public", table: "selections", filter: `week_id=eq.${weekId}` }, payload => {
       const r = payload.new || payload.old;
@@ -266,11 +271,25 @@ async function subscribeRealtime(){
     })
     .subscribe();
 
+  // Presence heartbeat + initial render
   setInterval(async ()=>{
     await supabase.from("users").update({ last_seen: new Date().toISOString() }).eq("id", localId);
     renderPresence();
   }, 15000);
   renderPresence();
+}
+
+/* Presence now fills usersById so tiles can show **names** */
+function renderPresence(){
+  const since = new Date(Date.now()-30000).toISOString();
+  supabase.from("users").select("id, display_name, last_seen").then(({data})=>{
+    const rows = (data||[]).sort((a,b)=> (b.last_seen||'').localeCompare(a.last_seen||''));
+    usersById = Object.fromEntries(rows.map(u => [u.id, u]));  // <— store users
+    presenceEl.innerHTML = rows.map(u=>{
+      const online = (u.last_seen||'') > since;
+      return `<li><span>${u.display_name}</span><span style="color:${online?'#4ade80':'#a3a3ad'}">${online?'Online':'Away'}</span></li>`;
+    }).join("") || "<div class='muted'>No one yet. Click Join.</div>";
+  });
 }
 
 function render(){
@@ -283,27 +302,22 @@ function render(){
     el.innerHTML = `
       <div style="flex:1;display:grid;place-items:center;"><div>${t}</div></div>
       <div class="who">
-        ${who.map(uid=>`<span class="badge" style="border-color:${colorFor(uid)}80;color:${colorFor(uid)};background:${colorFor(uid)}20">${(uid.match(/[A-Z0-9]/gi)||['?'])[0]}</span>`).join("")}
+        ${who.map(uid=>{
+          const name = (usersById[uid]?.display_name) || uid;
+          const col = colorFor(uid);
+          return `<span class="badge" style="border-color:${col}80;color:${col};background:${col}20" title="${name}">${name}</span>`;
+        }).join("")}
       </div>`;
     el.onclick = async () => {
       if (!isWeekday()) return alert("Clicks only allowed Mon–Fri for the active week.");
       await supabase.rpc("toggle_selection", { _week: weekId, _user: localId, _tile: i });
+      // Realtime callback updates the UI
     };
     gridEl.appendChild(el);
   });
 }
 
-function renderPresence(){
-  const since = new Date(Date.now()-30000).toISOString();
-  supabase.from("users").select("id, display_name, last_seen").then(({data})=>{
-    const rows = (data||[]).sort((a,b)=> (b.last_seen||'').localeCompare(a.last_seen||''));
-    presenceEl.innerHTML = rows.map(u=>{
-      const online = (u.last_seen||'') > since;
-      return `<li><span>${u.display_name}</span><span style="color:${online?'#4ade80':'#a3a3ad'}">${online?'Online':'Away'}</span></li>`;
-    }).join("") || "<div class='muted'>No one yet. Click Join.</div>";
-  });
-}
-
+/* Confetti only when a NEW line completes (or first blackout) */
 function confettiIfNewLineOrBlackout() {
   const lines = [
     [0,1,2,3,4],[5,6,7,8,9],[10,11,12,13,14],
