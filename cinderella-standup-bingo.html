@@ -51,7 +51,7 @@
     <section>
       <div id="grid" class="grid"></div>
       <div class="muted" style="margin-top:8px;">Lines & blackout detected per user; names show who marked each tile.</div>
-      <footer>v3.4 — tile edits preserve marks by name; admin tools</footer>
+      <footer>v3.5 — tile edits preserve marks by name; admin tools; clear-all-marks</footer>
     </section>
 
     <aside class="right">
@@ -78,6 +78,9 @@
         </div>
         <div style="display:flex; gap:8px; margin-top:10px;">
           <button id="saveTilesNow" title="Updates tiles and preserves current clicks">Save & apply now</button>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:10px;">
+          <button id="clearAllMarks" title="Delete ALL selections for this week">Clear all marks (this week)</button>
         </div>
         <small class="muted">Applying now keeps existing marks; only removed tiles lose their marks.</small>
       </div>
@@ -119,6 +122,7 @@ const tileList = document.getElementById("tileList");
 const newTileInput = document.getElementById("newTile");
 const addTileBtn = document.getElementById("addTileBtn");
 const saveTilesNowBtn = document.getElementById("saveTilesNow");
+const clearAllMarksBtn = document.getElementById("clearAllMarks");
 
 /* === LOCAL USER === */
 const localId = getOrSet("bingo_user_id", crypto.randomUUID());
@@ -439,7 +443,7 @@ saveTilesNowBtn.onclick = async () => {
 
   // Rebuild myMarks
   myMarks = new Set();
-  for (let i = 0; i => i < tiles.length; i++) {
+  for (let i = 0; i < tiles.length; i++) {
     if (selectionsByTile[i] && selectionsByTile[i].has(localId)) myMarks.add(i);
   }
 
@@ -447,6 +451,28 @@ saveTilesNowBtn.onclick = async () => {
   render();
 
   alert("Tiles updated — marks preserved by tile name.");
+};
+
+/* Clear ALL marks this week (admin) */
+clearAllMarksBtn.onclick = async () => {
+  if (!adminToken) return alert("Admin not logged in");
+  if (!confirm("This will delete ALL marks for the current week for EVERYONE. Proceed?")) return;
+
+  const { error } = await supabase
+    .from("selections")
+    .delete()
+    .eq("week_id", weekId);
+
+  if (error) return alert("Failed to clear marks: " + (error.message || error));
+
+  myMarks = new Set();
+  selectionsByTile = {};
+  for (let i = 0; i < tiles.length; i++) selectionsByTile[i] = new Set();
+  completedLines = new Set();
+  prevBlackout = false;
+
+  render();
+  alert("All marks cleared for this week.");
 };
 
 /* Render board */
