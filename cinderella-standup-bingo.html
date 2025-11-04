@@ -10,7 +10,7 @@
   h1 { margin:0 0 6px 0; font-size: clamp(22px,3vw,36px); }
   .muted { color:#a3a3ad; }
   .controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin: 12px 0 16px; }
-  input, select, button { background:#17171d; color:#eaeaf0; border:1px solid #2a2a34; border-radius:12px; padding:10px 12px; }
+  input, button { background:#17171d; color:#eaeaf0; border:1px solid #2a2a34; border-radius:12px; padding:10px 12px; }
   button { cursor:pointer; }
   button:hover { background:#1e1e26; }
   .grid { display:grid; gap:10px; grid-template-columns: repeat(5, minmax(120px,1fr)); }
@@ -21,8 +21,9 @@
   .badge { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid #ffffff40;
            max-width: 140px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .panel { background:#101018; border:1px solid #2a2a34; border-radius:16px; padding:12px; }
-  .presence li { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dashed #2a2a34; }
+  .presence li { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px dashed #2a2a34; }
   .presence li:last-child { border-bottom:0; }
+  .presence .actions button { padding:6px 8px; border-radius:10px; }
   .right { display:grid; gap:10px; }
   .confetti { position:fixed; inset:0; pointer-events:none; overflow:hidden; }
   @keyframes fall { to { transform: translateY(110vh) rotate(720deg); opacity:.9; } }
@@ -39,14 +40,16 @@
       <button id="join">Join</button>
       <button id="reset">Reset marks</button>
       <button id="shuffle" title="Reorder tiles for future weeks only">Shuffle next week</button>
-      <span id="weeklabel" class="muted"></span>
+      <button id="adminBtn" title="Admin login / logout">Admin</button>
+      <span id="adminState" class="muted" style="margin-left:6px;"></span>
+      <span id="weeklabel" class="muted" style="margin-left:auto;"></span>
     </div>
   </header>
 
   <main style="display:grid; grid-template-columns: 1fr 300px; gap:16px; align-items:start;">
     <section>
       <div id="grid" class="grid"></div>
-      <div class="muted" style="margin-top:8px;">Lines and blackout detected per user; **names** show who marked each tile.</div>
+      <div class="muted" style="margin-top:8px;">Lines and blackout detected per user; names show who marked each tile.</div>
     </section>
 
     <aside class="right">
@@ -86,6 +89,8 @@ const gridEl = document.getElementById("grid");
 const joinBtn = document.getElementById("join");
 const resetBtn = document.getElementById("reset");
 const shuffleBtn = document.getElementById("shuffle");
+const adminBtn = document.getElementById("adminBtn");
+const adminState = document.getElementById("adminState");
 const nameEl = document.getElementById("name");
 const presenceEl = document.getElementById("presence");
 const meEl = document.getElementById("me");
@@ -108,13 +113,12 @@ let selectionsByTile = {};         // tile_index -> Set<user_id>
 let completedLines = new Set();    // for “new line only” confetti
 let prevBlackout = false;
 let usersById = {};                // user_id -> {display_name, last_seen}
+let adminToken = null;             // set after login
 
 /* === Helpers === */
 function getMonday(d=new Date()) {
   const n = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  const day = n.getUTCDay() || 7; // Sun=0 -> 7
-  n.setUTCDate(n.getUTCDate() - day + 1);
-  return n;
+  const day = n.getUTCDay() || 7; n.setUTCDate(n.getUTCDate() - day + 1); return n;
 }
 function fmtDate(date) { return date.toISOString().slice(0,10); }
 function isWeekday(d=new Date()) { const wd = d.getDay(); return wd >= 1 && wd <= 5; }
@@ -141,6 +145,7 @@ await loadSelections();
 await loadHistory();
 render();
 
+/* === UI actions === */
 joinBtn.onclick = async () => {
   displayName = nameEl.value.trim() || `Player-${localId.slice(0,4)}`;
   localStorage.setItem("bingo_display_name", displayName);
@@ -171,6 +176,33 @@ shuffleBtn.onclick = async () => {
   alert("Shuffled board saved for next week.");
 };
 
+adminBtn.onclick = async () => {
+  if (adminToken) {
+    adminToken = null;
+    adminState.textContent = "(admin: logged out)";
+    renderPresence();
+    return;
+  }
+  const token = prompt("Enter admin token");
+  if (!token) return;
+  // quick probe: try a harmless delete on a fake user to validate
+  const probe = await supabase.rpc("admin_remove_user", { p_token: token, p_user: "00000000-0000-0000-0000-000000000000" });
+  if (probe.error && !String(probe.error.message || "").includes("unauthorized")) {
+    // Error is fine (fake user) as long as it's not unauthorized
+    adminToken = token;
+    adminState.textContent = "(admin: logged in)";
+    renderPresence();
+  } else if (!probe.error) {
+    // function returned true (unexpected but fine) -> logged in
+    adminToken = token;
+    adminState.textContent = "(admin: logged in)";
+    renderPresence();
+  } else {
+    alert("Invalid admin token");
+  }
+};
+
+/* === Data bootstrap === */
 async function ensureUser(update=false){
   const now = new Date().toISOString();
   const payload = { id: localId, display_name: displayName || `Player-${localId.slice(0,4)}`, last_seen: now };
@@ -252,7 +284,6 @@ async function loadHistory(){
 }
 
 async function subscribeRealtime(){
-  // Realtime selections for current week
   supabase.channel("selections")
     .on("postgres_changes", { event: "*", schema: "public", table: "selections", filter: `week_id=eq.${weekId}` }, payload => {
       const r = payload.new || payload.old;
@@ -271,7 +302,6 @@ async function subscribeRealtime(){
     })
     .subscribe();
 
-  // Presence heartbeat + initial render
   setInterval(async ()=>{
     await supabase.from("users").update({ last_seen: new Date().toISOString() }).eq("id", localId);
     renderPresence();
@@ -279,18 +309,36 @@ async function subscribeRealtime(){
   renderPresence();
 }
 
-/* Presence now fills usersById so tiles can show **names** */
+/* Presence now fills usersById so tiles can show **names** and admin can delete */
 function renderPresence(){
   const since = new Date(Date.now()-30000).toISOString();
   supabase.from("users").select("id, display_name, last_seen").then(({data})=>{
     const rows = (data||[]).sort((a,b)=> (b.last_seen||'').localeCompare(a.last_seen||''));
-    usersById = Object.fromEntries(rows.map(u => [u.id, u]));  // <— store users
+    usersById = Object.fromEntries(rows.map(u => [u.id, u]));
     presenceEl.innerHTML = rows.map(u=>{
       const online = (u.last_seen||'') > since;
-      return `<li><span>${u.display_name}</span><span style="color:${online?'#4ade80':'#a3a3ad'}">${online?'Online':'Away'}</span></li>`;
+      const actions = (adminToken && u.id !== localId)
+        ? `<span class="actions"><button title="Remove user" onclick="window.__removeUser('${u.id}','${encodeURIComponent(u.display_name)}')">🗑</button></span>`
+        : "";
+      return `<li><span>${u.display_name}</span><span style="color:${online?'#4ade80':'#a3a3ad'}">${online?'Online':'Away'}</span>${actions}</li>`;
     }).join("") || "<div class='muted'>No one yet. Click Join.</div>";
+
+    adminState.textContent = adminToken ? "(admin: logged in)" : "(admin: logged out)";
   });
 }
+
+/* Expose a tiny helper for the inline onclick above */
+window.__removeUser = async (uid, encName) => {
+  if (!adminToken) return alert("Admin not logged in");
+  const name = decodeURIComponent(encName);
+  if (!confirm(`Really remove user “${name}”? This also deletes their marks.`)) return;
+  const { error } = await supabase.rpc("admin_remove_user", { p_token: adminToken, p_user: uid });
+  if (error) { alert("Delete failed: " + (error.message || error)); return; }
+  // Refresh lists
+  await loadSelections();
+  renderPresence();
+  render();
+};
 
 function render(){
   gridEl.innerHTML = "";
@@ -311,7 +359,7 @@ function render(){
     el.onclick = async () => {
       if (!isWeekday()) return alert("Clicks only allowed Mon–Fri for the active week.");
       await supabase.rpc("toggle_selection", { _week: weekId, _user: localId, _tile: i });
-      // Realtime callback updates the UI
+      // realtime will update UI
     };
     gridEl.appendChild(el);
   });
